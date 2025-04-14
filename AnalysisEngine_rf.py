@@ -1,140 +1,152 @@
-import subprocess
-import sys
-
-# 🔍 Ensure required packages are installed
-required_packages = ["pandas", "numpy", "scikit-learn", "joblib"]
-for package in required_packages:
-    try:
-        __import__(package)
-    except ImportError:
-        print(f"📦 '{package}' not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# ✅ After ensuring packages, import them
 import pandas as pd
 import numpy as np
-import joblib
-import logging
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import r2_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.metrics import (
+    mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error,
+    accuracy_score, precision_score, recall_score, f1_score
+)
+from sklearn.preprocessing import KBinsDiscretizer
+
+print("🚀 Starting model fine-tuning for BeeGFS chunk size prediction...")
+
+# Load data
+df = pd.read_csv("train.csv")  # Update path if needed
+features = ['file_size_KB', 'access_count', 'avg_read_KB', 'avg_write_KB',
+            'max_read_KB', 'max_write_KB', 'read_ops', 'write_ops', 'throughput_KBps']
+target = 'chunk_size_KB'
+df_clean = df[features + [target]].dropna()
+print(f"✅ Loaded and cleaned data: {len(df_clean)} rows")
+
+# Prepare data
+X = df_clean[features]
+y = df_clean[target]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# For classification-style metrics
+bin_enc = KBinsDiscretizer(n_bins=5, encode='ordinal', strategy='quantile')
+y_test_bins = bin_enc.fit_transform(y_test.values.reshape(-1, 1)).ravel()
+
+# Parameter grid
+param_distributions = {
+    'n_estimators': [100, 200, 300, 500],
+    'max_depth': [None, 10, 20, 30, 40],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'max_features': ['auto', 'sqrt', 'log2']
+}
+
+# RandomizedSearchCV
+print("🔍 Starting hyperparameter search...")
+base_model = RandomForestRegressor(random_state=42)
+search = RandomizedSearchCV(estimator=base_model,
+                            param_distributions=param_distributions,
+                            n_iter=25,
+                            cv=5,
+                            verbose=1,
+                            n_jobs=-1,
+                            scoring='r2',
+                            random_state=42)
+search.fit(X_train, y_train)
+
+# Evaluation
+print("📈 Evaluating best model...")
+best_model = search.best_estimator_
+y_pred = best_model.predict(X_test)
+
+# Regression metrics
+mse = mean_squared_error(y_test, y_pred)
+rmse = np.sqrt(mse)
+mae = mean_absolute_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+mape = mean_absolute_percentage_error(y_test, y_pred)
+
+# Classification-style metrics
+y_pred_bins = bin_enc.transform(y_pred.reshape(-1, 1)).ravel()
+accuracy = accuracy_score(y_test_bins, y_pred_bins)
+precision = precision_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
+recall = recall_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
+f1 = f1_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
 
 
-class BeeGFSAnalysisEngine:
-    def __init__(self, data_csv, model_path="beegfs_chunk_model.pkl"):
-        self.data_csv = data_csv
-        self.model_path = model_path
-        self.model = RandomForestRegressor(n_estimators=100, random_state=42)
-        self.feature_columns = ['File Size', 'DD Write', 'DD Read', 'FIO Write', 'FIO Read']
 
-    def load_and_train_model(self):
-        print("🔄 Loading training data...")
-        try:
-            df = pd.read_csv(self.data_csv)
-            print(f"✅ Data loaded: {len(df)} rows.")
-        except Exception as e:
-            logging.error("❌ Failed to load data from CSV: %s", e)
-            print("❌ Error loading data.")
-            return
+# import pandas as pd
+# import numpy as np
+# from sklearn.ensemble import RandomForestRegressor
+# from sklearn.model_selection import train_test_split
+# from sklearn.metrics import (
+#     mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error,
+#     accuracy_score, precision_score, recall_score, f1_score
+# )
+# from sklearn.preprocessing import KBinsDiscretizer
 
-        print("🧹 Cleaning data...")
-        df = df.dropna()
-        for col in self.feature_columns + ['Chunk Size']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        df = df.dropna()
+# print("🚀 Starting BeeGFS Chunk Size Predictor...")
 
-        if df.empty:
-            logging.error("❌ No valid data after cleaning.")
-            print("❌ No valid data available for training.")
-            return
+# # Load dataset
+# csv_path = "train.csv"  # Change path if needed
+# print(f"📂 Loading dataset from '{csv_path}'...")
+# df = pd.read_csv(csv_path)
+# print(f"✅ Loaded {len(df)} rows.")
 
-        print("🔧 Preparing features and labels...")
-        X = df[self.feature_columns]
-        y = df['Chunk Size']
+# # Define columns
+# features = ['file_size_KB', 'access_count', 'avg_read_KB', 'avg_write_KB',
+#             'max_read_KB', 'max_write_KB', 'read_ops', 'write_ops', 'throughput_KBps']
+# target = 'chunk_size_KB'
 
-        print("✂️ Splitting dataset...")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, random_state=42
-        )
+# print("🧹 Cleaning data...")
+# df_clean = df[features + [target]].dropna()
+# print(f"✅ Remaining rows after cleaning: {len(df_clean)}")
 
-        print("🌲 Training Random Forest model...")
-        self.model.fit(X_train, y_train)
-        y_pred = self.model.predict(X_test)
-        score = r2_score(y_test, y_pred)
-        logging.info("✅ Model trained. R2 score: %.3f", score)
-        print(f"✅ Model training complete. R2 score: {score:.3f}")
+# # Prepare features and labels
+# print("🧠 Preparing features and target variable...")
+# X = df_clean[features]
+# y = df_clean[target]
 
-        print("💾 Saving trained model...")
-        joblib.dump(self.model, self.model_path)
-        print(f"✅ Model saved to: {self.model_path}")
+# # Split the data
+# print("✂️ Splitting into train and test sets (70/30)...")
+# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+# print(f"📊 Train size: {len(X_train)} | Test size: {len(X_test)}")
 
-    def predict_chunk_size(self, metrics):
-        print("🔍 Predicting chunk size for input metrics...")
-        try:
-            X_new = np.array([[metrics[feature] for feature in self.feature_columns]])
-        except KeyError as e:
-            logging.error("❌ Missing metric key: %s", e)
-            print(f"❌ Error: Missing metric key: {e}")
-            return None
+# # Train the model
+# print("🌲 Training Random Forest Regressor...")
+# model = RandomForestRegressor(n_estimators=100, random_state=42)
+# model.fit(X_train, y_train)
+# print("✅ Model training complete.")
 
-        predicted_chunk_size = self.model.predict(X_new)
-        print(f"🎯 Predicted optimal chunk size: {predicted_chunk_size[0]:.2f}")
-        return predicted_chunk_size[0]
+# # Make predictions
+# print("🔍 Making predictions on test data...")
+# y_pred = model.predict(X_test)
 
-    def update_beegfs_configuration(self, chunk_size):
-        cmd = f'beegfs-tool --set-chunk-size {chunk_size:.2f}'
-        print(f"🛠️ Running system command: {cmd}")
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, check=True
-            )
-            print("✅ BeeGFS configuration updated successfully.")
-            logging.info("BeeGFS configuration updated: %s", result.stdout)
-        except subprocess.CalledProcessError as error:
-            logging.error("❌ BeeGFS configuration failed: %s", error.stderr)
-            print("❌ Error updating BeeGFS configuration.")
+# # Compute regression metrics
+# print("📈 Calculating regression metrics...")
+# mse = mean_squared_error(y_test, y_pred)
+# rmse = np.sqrt(mse)
+# mae = mean_absolute_error(y_test, y_pred)
+# r2 = r2_score(y_test, y_pred)
+# mape = mean_absolute_percentage_error(y_test, y_pred)
 
-    def run(self, metrics):
-        print("🚀 Running BeeGFS Analysis Engine...")
-        optimal_chunk_size = self.predict_chunk_size(metrics)
-        if optimal_chunk_size is not None:
-            self.update_beegfs_configuration(optimal_chunk_size)
-        else:
-            print("⚠️ Prediction failed. Configuration update skipped.")
+# # Binned classification-style metrics
+# print("🧪 Calculating classification-style metrics using binned chunk sizes...")
+# bin_enc = KBinsDiscretizer(n_bins=5, encode='ordinal', strategy='quantile')
+# y_test_bins = bin_enc.fit_transform(y_test.values.reshape(-1, 1)).ravel()
+# y_pred_bins = bin_enc.transform(y_pred.reshape(-1, 1)).ravel()
 
+# accuracy = accuracy_score(y_test_bins, y_pred_bins)
+# precision = precision_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
+# recall = recall_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
+# f1 = f1_score(y_test_bins, y_pred_bins, average='weighted', zero_division=0)
 
-if __name__ == "__main__":
-    import argparse
+# Print all results
+print("\nAll metrics computed successfully.")
+print("\nPerformance Metrics:")
+print(f"MSE: {mse:.2f}")
+print(f"RMSE: {rmse:.2f}")
+print(f"MAE: {mae:.2f}")
+print(f"R2 Score: {r2:.3f}")
+print(f"MAPE: {mape:.3%}")
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-    parser = argparse.ArgumentParser(description="BeeGFS Analysis Engine CLI")
-    parser.add_argument("--data", required=True, help="Path to training CSV file")
-    parser.add_argument("--predict", action="store_true", help="Run prediction and update")
-    parser.add_argument("--file_size", type=float, help="File size in MB")
-    parser.add_argument("--dd_write", type=float, help="DD Write throughput")
-    parser.add_argument("--dd_read", type=float, help="DD Read throughput")
-    parser.add_argument("--fio_write", type=float, help="FIO Write bandwidth")
-    parser.add_argument("--fio_read", type=float, help="FIO Read bandwidth")
-    args = parser.parse_args()
-
-    engine = BeeGFSAnalysisEngine(data_csv=args.data)
-
-    print("📚 Training model...")
-    engine.load_and_train_model()
-
-    if args.predict:
-        print("🧠 Running prediction...")
-        required_metrics = {
-            "File Size": args.file_size,
-            "DD Write": args.dd_write,
-            "DD Read": args.dd_read,
-            "FIO Write": args.fio_write,
-            "FIO Read": args.fio_read
-        }
-
-        missing = [k for k, v in required_metrics.items() if v is None]
-        if missing:
-            print(f"⚠️ Missing required inputs for prediction: {missing}")
-        else:
-            engine.run(required_metrics)
+print("\nClassification Metrics (chunk size):")
+print(f"Accuracy: {accuracy:.3%}")
+print(f"Precision: {precision:.3%}")
+print(f"Recall: {recall:.3%}")
+print(f"F1 Score: {f1:.3%}")
