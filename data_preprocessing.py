@@ -64,7 +64,7 @@ class OptimalThroughputProcessor:
 
 
 if __name__ == "__main__":
-    processor = ThroughputProcessor(
+    processor = OptimalThroughputProcessor(
         input_csv='sample.csv',
         output_csv='out_sample.csv',
         quantile=0.65
